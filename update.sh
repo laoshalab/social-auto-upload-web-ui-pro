@@ -15,8 +15,8 @@ CROSS="${RED}✗${NC}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 BACKEND_DIR="$PROJECT_ROOT/backend"
-REPO_URL="https://github.com/DevilJie/social-auto-upload-web-ui.git"
-MAIN_BRANCH="master"
+REPO_URL="https://github.com/laoshalab/social-auto-upload-web-ui-pro.git"
+MAIN_BRANCH="main"
 
 if ! command -v git &>/dev/null; then
     echo -e "${CROSS} 未找到 git，无法更新"
@@ -51,13 +51,13 @@ fi
 echo ""
 echo "  当前分支: $CURRENT_BRANCH"
 echo "  正在检查更新..."
-if ! git fetch origin "$CURRENT_BRANCH" 2>/dev/null; then
+if ! git fetch origin "$MAIN_BRANCH" 2>/dev/null; then
     echo -e "${CROSS} 无法连接远端仓库，请检查网络连接"
     exit 1
 fi
 
 LOCAL_HASH=$(git rev-parse HEAD 2>/dev/null || echo "")
-REMOTE_HASH=$(git rev-parse "origin/$CURRENT_BRANCH" 2>/dev/null || echo "")
+REMOTE_HASH=$(git rev-parse "origin/$MAIN_BRANCH" 2>/dev/null || echo "")
 
 if [[ -z "$REMOTE_HASH" ]]; then
     echo -e "${CROSS} 无法获取远端版本信息"
@@ -77,7 +77,7 @@ echo ""
 echo -e "${CYAN}是否更新？[Y/n]  更新将覆盖本地修改，未提交的代码将丢失${NC}"
 read -r answer
 if [[ ! "$answer" =~ ^[Nn]$ ]]; then
-    git reset --hard "origin/$CURRENT_BRANCH" > /dev/null 2>&1
+    git reset --hard "origin/$MAIN_BRANCH" > /dev/null 2>&1
     echo -e "${CHECK} 更新完成"
 else
     echo "  已取消更新"

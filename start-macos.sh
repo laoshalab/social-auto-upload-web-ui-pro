@@ -62,8 +62,8 @@ fi
 unset _chrome_bin
 
 # --- 项目代码管理（git clone / update）---
-REPO_URL="https://github.com/DevilJie/social-auto-upload-web-ui.git"
-MAIN_BRANCH="master"
+REPO_URL="https://github.com/laoshalab/social-auto-upload-web-ui-pro.git"
+MAIN_BRANCH="main"
 
 if [[ ! -d "$BACKEND_DIR" ]]; then
     # 首次使用：没有项目代码，从 GitHub 克隆

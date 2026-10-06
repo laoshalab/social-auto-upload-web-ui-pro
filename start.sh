@@ -61,9 +61,9 @@ if _chrome_bin=$(find_cloakbrowser_binary "$CLOAKBROWSER_LOCAL"); then
 fi
 unset _chrome_bin
 
-# --- 项目代码管理（git clone / 强制更新到最新）---
-REPO_URL="https://github.com/DevilJie/social-auto-upload-web-ui.git"
-MAIN_BRANCH="master"
+# --- 代码仓库：首次克隆，以及每次启动时检查更新 ---
+REPO_URL="https://github.com/laoshalab/social-auto-upload-web-ui-pro.git"
+MAIN_BRANCH="main"
 
 if [[ ! -d "$BACKEND_DIR" ]]; then
     # 首次使用：没有项目代码，从 GitHub 克隆
@@ -87,20 +87,6 @@ if [[ ! -d "$BACKEND_DIR" ]]; then
     echo -e "${CHECK} 项目代码拉取完成"
     echo ""
     exec bash "$PROJECT_ROOT/start.sh"
-fi
-
-# 已有项目代码：强制更新到最新版本（覆盖本地修改，不询问）
-if command -v git &>/dev/null && [[ -d "$PROJECT_ROOT/.git" ]]; then
-    cd "$PROJECT_ROOT"
-    echo -e "${CYAN}正在检查并更新到最新版本...${NC}"
-    git remote set-url origin "$REPO_URL" 2>/dev/null
-    if git fetch origin "$MAIN_BRANCH" 2>/dev/null; then
-        git checkout -f "$MAIN_BRANCH" 2>/dev/null
-        git reset --hard "origin/$MAIN_BRANCH"
-        echo -e "${CHECK} 已更新到最新版本"
-    else
-        print_warn "无法连接 GitHub 更新，继续使用本地版本"
-    fi
 fi
 
 # --- 日志文件 ---
@@ -155,6 +141,82 @@ print_fail() {
 
 print_warn() {
     echo -e "  ${WARN} $1"
+}
+
+# 每次启动从 GitHub 拉取更新。远程有新提交且本地能快进时才更新；
+# 未提交修改先暂存，更新后再恢复。连不上仓库时用本地代码继续启动。
+update_from_github() {
+    if ! command -v git &>/dev/null; then
+        print_warn "未找到 git，跳过更新检查"
+        return 0
+    fi
+    if ! git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree &>/dev/null; then
+        print_warn "当前目录不是 git 仓库，跳过更新检查"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}检查 GitHub 更新...${NC}"
+    echo -e "  仓库: ${REPO_URL} (${MAIN_BRANCH})"
+
+    local before remote_sha
+    before=$(git -C "$PROJECT_ROOT" rev-parse HEAD)
+
+    export GIT_TERMINAL_PROMPT=0
+    if ! git -C "$PROJECT_ROOT" fetch --quiet "$REPO_URL" "$MAIN_BRANCH"; then
+        print_warn "无法连接 GitHub，使用本地代码继续启动"
+        return 0
+    fi
+
+    remote_sha=$(git -C "$PROJECT_ROOT" rev-parse FETCH_HEAD)
+    if [[ "$before" == "$remote_sha" ]]; then
+        print_ok "已是最新 (${remote_sha:0:7})"
+        return 0
+    fi
+
+    local script_changed=0 remote_script=""
+    if ! git -C "$PROJECT_ROOT" diff --quiet "$before" FETCH_HEAD -- start.sh; then
+        script_changed=1
+        remote_script=$(git -C "$PROJECT_ROOT" rev-parse "FETCH_HEAD:start.sh")
+    fi
+
+    local dirty=0
+    if [[ -n "$(git -C "$PROJECT_ROOT" status --porcelain)" ]]; then
+        dirty=1
+        print_warn "检测到本地未提交修改，先暂存再更新"
+        if ! git -C "$PROJECT_ROOT" stash push -u -m "start.sh auto-stash $(date +%Y%m%d-%H%M%S)"; then
+            print_warn "暂存本地修改失败，跳过本次更新"
+            return 0
+        fi
+    fi
+
+    echo -e "  ${CYAN}发现新版本 ${before:0:7} → ${remote_sha:0:7}，正在更新...${NC}"
+    if ! git -C "$PROJECT_ROOT" merge --ff-only FETCH_HEAD; then
+        print_warn "本地提交无法快进到远程，跳过本次更新"
+        if [[ "$dirty" -eq 1 ]]; then
+            git -C "$PROJECT_ROOT" stash pop || print_warn "恢复本地修改失败，请手动执行 git stash pop"
+        fi
+        return 0
+    fi
+    print_ok "已更新到 ${remote_sha:0:7}"
+
+    if [[ "$dirty" -eq 1 ]]; then
+        if git -C "$PROJECT_ROOT" stash pop; then
+            print_ok "已恢复本地未提交修改"
+        else
+            print_warn "本地修改与更新冲突，已留在 stash，请手动执行 git stash pop"
+        fi
+    fi
+
+    if [[ "$script_changed" -eq 1 ]]; then
+        local current_script
+        current_script=$(git -C "$PROJECT_ROOT" hash-object "$PROJECT_ROOT/start.sh")
+        if [[ "$current_script" == "$remote_script" ]]; then
+            echo -e "${CYAN}启动脚本已更新，重新执行...${NC}"
+            exec bash "$PROJECT_ROOT/start.sh"
+        fi
+        print_warn "启动脚本有更新，但本地修改仍在，本次继续使用当前脚本"
+    fi
 }
 
 # 带旋转动画的等待命令执行
@@ -221,6 +283,11 @@ check_hash_changed() {
     saved_hash=$(cat "$hash_file")
     [[ "$current_hash" != "$saved_hash" ]]
 }
+
+# ============================================================
+# 启动前：检查并更新代码
+# ============================================================
+update_from_github
 
 # ============================================================
 # Step 1: 检查运行时环境

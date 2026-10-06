@@ -232,11 +232,11 @@ Full release notes are in the [`changelog/`](../../../changelog) directory.
 
 If this project helps you, a ⭐ Star is greatly appreciated!
 
-<a href="https://star-history.com/#DevilJie/social-auto-upload-web-ui&Date">
+<a href="https://star-history.com/#laoshalab/social-auto-upload-web-ui-pro&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=DevilJie/social-auto-upload-web-ui&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=DevilJie/social-auto-upload-web-ui&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=DevilJie/social-auto-upload-web-ui&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=laoshalab/social-auto-upload-web-ui-pro&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=laoshalab/social-auto-upload-web-ui-pro&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=laoshalab/social-auto-upload-web-ui-pro&type=Date" />
   </picture>
 </a>
 

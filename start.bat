@@ -30,8 +30,8 @@ if exist "%PROJECT_ROOT%\dependency\cloakbrowser\chrome.exe" (
     set "CLOAKBROWSER_BINARY_PATH=%PROJECT_ROOT%\dependency\cloakbrowser\chrome.exe"
 )
 :: --- 项目代码管理（git clone / 强制更新到最新）---
-set "REPO_URL=https://github.com/DevilJie/social-auto-upload-web-ui.git"
-set "MAIN_BRANCH=master"
+set "REPO_URL=https://github.com/laoshalab/social-auto-upload-web-ui-pro.git"
+set "MAIN_BRANCH=main"
 
 if not exist "%BACKEND_DIR%" (
     rem 首次使用：没有项目代码，从 GitHub 克隆

@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Version](https://img.shields.io/badge/version-1.2.5-42b883.svg)](./changelog)
 [![Platforms](https://img.shields.io/badge/platforms-19-ff6b6b.svg)](#-支持平台)
-[![GitHub stars](https://img.shields.io/github/stars/DevilJie/social-auto-upload-web-ui?style=social)](https://github.com/DevilJie/social-auto-upload-web-ui)
+[![GitHub stars](https://img.shields.io/github/stars/laoshalab/social-auto-upload-web-ui-pro?style=social)](https://github.com/laoshalab/social-auto-upload-web-ui-pro)
 
 🇨🇳 简体中文 ｜ 🇺🇸 [English](./docs/readme/en_us/README.md)
 
@@ -242,15 +242,15 @@ cd backend-mcp && npm test                        # MCP 服务测试（vitest）
 
 如果这个项目对你有帮助，欢迎点个 ⭐ Star 支持一下！
 
-<a href="https://github.com/DevilJie/social-auto-upload-web-ui">
-  <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/DevilJie/social-auto-upload-web-ui?style=for-the-badge&logo=github" />
+<a href="https://github.com/laoshalab/social-auto-upload-web-ui-pro">
+  <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/laoshalab/social-auto-upload-web-ui-pro?style=for-the-badge&logo=github" />
 </a>
 
-<a href="https://star-history.com/#DevilJie/social-auto-upload-web-ui&Date">
+<a href="https://star-history.com/#laoshalab/social-auto-upload-web-ui-pro&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=DevilJie/social-auto-upload-web-ui&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=DevilJie/social-auto-upload-web-ui&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=DevilJie/social-auto-upload-web-ui&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=laoshalab/social-auto-upload-web-ui-pro&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=laoshalab/social-auto-upload-web-ui-pro&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=laoshalab/social-auto-upload-web-ui-pro&type=Date" />
   </picture>
 </a>
 
