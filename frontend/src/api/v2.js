@@ -62,6 +62,9 @@ export const settingsApi = {
   updateSettings(data) {
     return http.put('/api/v2/settings', data)
   },
+  testProxy(proxyUrl) {
+    return http.post('/api/v2/settings/test-proxy', { proxyUrl })
+  },
 }
 
 // 批量视频发布（发布页视频队列）

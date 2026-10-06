@@ -7,7 +7,13 @@ from unittest.mock import patch, MagicMock
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-from ext_api.task_queue import PublishTask, TaskStatus, TaskQueue, aggregate_batch_status
+from ext_api.task_queue import (
+    PublishTask,
+    TaskStatus,
+    TaskQueue,
+    aggregate_batch_status,
+    aggregate_detail_statuses,
+)
 
 
 def test_publish_task_default_new_fields():
@@ -430,6 +436,31 @@ def test_aggregate_batch_status_in_flight_priority_over_fail_zero():
 def test_aggregate_batch_status_in_flight_with_queued_only():
     """单条 queued 详情（in_flight=1）→ running。"""
     assert aggregate_batch_status(succ=0, fail=0, in_flight=1, total=1) == 'running'
+
+
+def test_success_plus_pending_stays_running():
+    """1 条成功 + 1 条 pending：pending 算未结束，批次保持 running。"""
+    assert aggregate_detail_statuses(["success", "pending"]) == "running"
+
+
+def test_aggregate_batch_status_all_cancelled_is_not_success():
+    """全部 cancelled（succ=0, fail=0, 无 in-flight）必须是 cancelled，不能是 success。
+
+    服务重启把 running 明细标成 cancelled 后，旧逻辑因 fail==0 把批次写成 success，
+    发布历史显示「全部成功」，账号上却没有稿件。
+    """
+    assert aggregate_batch_status(succ=0, fail=0, in_flight=0, total=1) == 'cancelled'
+    assert aggregate_batch_status(succ=0, fail=0, in_flight=0, total=2) == 'cancelled'
+
+
+def test_aggregate_batch_status_success_plus_cancelled_is_partial():
+    """有成功也有取消 → partial，不能因为 fail==0 标成全部成功。"""
+    assert aggregate_batch_status(succ=1, fail=0, in_flight=0, total=2) == 'partial'
+
+
+def test_aggregate_batch_status_failed_plus_cancelled_is_failed():
+    """没有成功、有失败也有取消 → failed。"""
+    assert aggregate_batch_status(succ=0, fail=1, in_flight=0, total=2) == 'failed'
 
 
 def test_aggregate_batch_status_single_running_detail():

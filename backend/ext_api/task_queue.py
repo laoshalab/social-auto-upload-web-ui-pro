@@ -28,6 +28,45 @@ logger = get_channel_logger("task_queue")
 
 DB_PATH = BASE_DIR / "db" / "database.db"
 
+# 尚未结束的明细。pending 必须算在内，否则会被推断成 cancelled，
+# 批次在后序任务还没开始时就被写成终态。
+OPEN_DETAIL_STATUSES = ("pending", "queued", "running")
+
+
+def _detail_count_sql() -> str:
+    listed = ", ".join(f"'{s}'" for s in OPEN_DETAIL_STATUSES)
+    return f"""SELECT COUNT(*),
+                  SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN status IN ({listed}) THEN 1 ELSE 0 END)
+           FROM publish_details WHERE batch_id=?"""
+
+
+def aggregate_detail_statuses(statuses) -> str:
+    """按明细状态列表聚合。pending / queued / running 都算未结束。"""
+    statuses = list(statuses)
+    total = len(statuses)
+    succ = sum(1 for s in statuses if s == "success")
+    fail = sum(1 for s in statuses if s == "failed")
+    in_flight = sum(1 for s in statuses if s in OPEN_DETAIL_STATUSES)
+    return aggregate_batch_status(
+        succ=succ, fail=fail, in_flight=in_flight, total=total
+    )
+
+
+def summarize_batch_details(conn, batch_id: str):
+    """返回 (batch_status, success_count, failed_count, total)。"""
+    counts = conn.execute(_detail_count_sql(), (batch_id,)).fetchone()
+    total = counts[0] or 0
+    succ = counts[1] or 0
+    fail = counts[2] or 0
+    in_flight = counts[3] or 0
+    status = aggregate_batch_status(
+        succ=succ, fail=fail, in_flight=in_flight, total=total
+    )
+    return status, succ, fail, total
+
+
 # 同步平台(publish_video 内部自己 asyncio.run)的执行线程池。
 # 必须自持有 CF future:同步线程无法强杀,取消时要能等它自然收尾。
 _SYNC_EXEC = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sync-publish")
@@ -35,16 +74,7 @@ _SYNC_EXEC = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sync-publish"
 
 def _refresh_batch_status(conn, batch_id: str):
     """按 detail 行重算 batch 聚合状态(与 _update_db 内逻辑一致)。"""
-    counts = conn.execute(
-        """SELECT COUNT(*),
-                  SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END)
-           FROM publish_details WHERE batch_id=?""",
-        (batch_id,),
-    ).fetchone()
-    total, succ, fail, in_flight = counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0
-    bs = aggregate_batch_status(succ=succ, fail=fail, in_flight=in_flight, total=total)
+    bs, succ, fail, total = summarize_batch_details(conn, batch_id)
     now = datetime.now().isoformat()
     conn.execute(
         """UPDATE publish_batches
@@ -69,24 +99,37 @@ def _cleanup_orphaned_tasks() -> int:
                 "SELECT id, batch_id FROM publish_details"
                 " WHERE status IN ('running', 'queued')"
             ).fetchall()
-            if not rows:
-                return 0
-            ids = [r[0] for r in rows]
-            batch_ids = sorted({r[1] for r in rows if r[1]})
-            ph = ",".join("?" * len(ids))
-            conn.execute(
-                f"UPDATE publish_details SET status='cancelled',"
-                f" error_message='服务重启,任务已中断', finished_at=?"
-                f" WHERE id IN ({ph})",
-                (now, *ids),
-            )
-            for bid in batch_ids:
+            n = 0
+            if rows:
+                ids = [r[0] for r in rows]
+                batch_ids = sorted({r[1] for r in rows if r[1]})
+                ph = ",".join("?" * len(ids))
+                conn.execute(
+                    f"UPDATE publish_details SET status='cancelled',"
+                    f" error_message='服务重启,任务已中断', finished_at=?"
+                    f" WHERE id IN ({ph})",
+                    (now, *ids),
+                )
+                for bid in batch_ids:
+                    _refresh_batch_status(conn, bid)
+                n = len(ids)
+                logger.info(
+                    "[TaskQueue] 启动清理: %d 个孤儿任务(重启前残留 running/queued)已标记取消",
+                    n,
+                )
+            # 历史误标：detail 已全部取消/失败，batch 仍是 success 且 success_count=0。
+            # 与本次是否有孤儿任务无关，否则已经写错的批次永远停在「全部成功」。
+            stale = conn.execute(
+                "SELECT id FROM publish_batches WHERE status='success' AND COALESCE(success_count, 0)=0"
+            ).fetchall()
+            for (bid,) in stale:
                 _refresh_batch_status(conn, bid)
-            logger.info(
-                "[TaskQueue] 启动清理: %d 个孤儿任务(重启前残留 running/queued)已标记取消",
-                len(ids),
-            )
-            return len(ids)
+            if stale:
+                logger.info(
+                    "[TaskQueue] 已纠正 %d 个误标为成功、实际没有成功明细的批次",
+                    len(stale),
+                )
+            return n
     except Exception as e:
         logger.info("[TaskQueue] 启动清理孤儿任务失败: %s", e)
         return 0
@@ -147,20 +190,27 @@ def aggregate_batch_status(*, succ: int, fail: int, in_flight: int, total: int) 
 
     优先级：
       1. total == 0            -> 'pending'    （无 detail，理论不该发生）
-      2. in_flight > 0         -> 'running'    （仍有 queued/running detail 未结束）
-      3. fail == 0             -> 'success'    （全部成功）
-      4. succ == 0             -> 'failed'     （全部失败）
-      5. 其余                  -> 'partial'    （混合成功+失败）
+      2. in_flight > 0         -> 'running'    （仍有 pending/queued/running 未结束）
+      3. succ == total         -> 'success'    （每一条都成功）
+      4. succ > 0              -> 'partial'    （有成功，也有失败或取消）
+      5. 其余且没有 failed     -> 'cancelled'  （全部取消，一条都没发出去）
+      6. 其余                  -> 'failed'     （全部失败，或失败+取消）
+
+    cancelled 不计入 fail。若用「fail == 0 即成功」，服务重启把任务标成
+    cancelled 后，batch 会被写成 success，发布历史显示「全部成功」。
     """
     if total == 0:
         return 'pending'
     if in_flight > 0:
         return 'running'
-    if fail == 0:
+    if succ == total:
         return 'success'
-    if succ == 0:
-        return 'failed'
-    return 'partial'
+    if succ > 0:
+        return 'partial'
+    cancelled = total - succ - fail - in_flight
+    if fail == 0 and cancelled > 0:
+        return 'cancelled'
+    return 'failed'
 
 
 @dataclass
@@ -812,22 +862,12 @@ class TaskQueue:
                     (task.status, task.retry_count, task.error_message, task.publish_url,
                      task.started_at, task.finished_at, task.id)
                 )
-                # 聚合
                 row = conn.execute(
                     "SELECT batch_id FROM publish_details WHERE id=?", (task.id,)
                 ).fetchone()
                 if not row: return
                 batch_id = row[0]
-                counts = conn.execute(
-                    """SELECT COUNT(*),
-                              SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
-                              SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
-                              SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END)
-                       FROM publish_details WHERE batch_id=?""",
-                    (batch_id,)
-                ).fetchone()
-                total, succ, fail, in_flight = counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0
-                bs = aggregate_batch_status(succ=succ, fail=fail, in_flight=in_flight, total=total)
+                bs, succ, fail, total = summarize_batch_details(conn, batch_id)
                 now = datetime.now().isoformat()
                 conn.execute(
                     """UPDATE publish_batches

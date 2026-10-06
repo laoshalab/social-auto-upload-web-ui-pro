@@ -705,6 +705,10 @@ def login():
         except asyncio.CancelledError:
             logger.info(f"[login] 用户关闭了浏览器，{platform.platform_name} 登录取消")
             status_queue.put(json.dumps({"status": "error", "msg": "用户关闭了浏览器"}))
+        except Exception as e:
+            # 代理校验等在平台 login 之外抛出时，必须推终态，否则 SSE 会一直空转
+            logger.info(f"[login] {platform.platform_name} 登录失败: {e}")
+            status_queue.put(json.dumps({"status": "500", "msg": str(e)}))
 
     thread = threading.Thread(
         target=_run_login,
@@ -1357,24 +1361,8 @@ def _update_publish_result(detail_id, status, finished_at, error_message=""):
             if not row:
                 return
             batch_id = row[0]
-            # 聚合：算 success/failed 数量，更新 batch 状态
-            counts = conn.execute(
-                """SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success_n,
-                    SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed_n
-                   FROM publish_details WHERE batch_id=?""",
-                (batch_id,)
-            ).fetchone()
-            total, succ, fail = counts[0], counts[1] or 0, counts[2] or 0
-            if total == 0:
-                batch_status = 'pending'
-            elif fail == 0:
-                batch_status = 'success'
-            elif succ == 0:
-                batch_status = 'failed'
-            else:
-                batch_status = 'partial'
+            from ext_api.task_queue import summarize_batch_details
+            batch_status, succ, fail, total = summarize_batch_details(conn, batch_id)
             conn.execute(
                 """UPDATE publish_batches
                    SET status=?, success_count=?, failed_count=?, account_count=?,

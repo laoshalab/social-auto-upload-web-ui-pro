@@ -812,6 +812,18 @@ def update_settings():
         return jsonify({"code": 500, "msg": str(e)}), 500
 
 
+@ext_api.route('/settings/test-proxy', methods=['POST'])
+def test_proxy():
+    """测试 HTTP 代理是否连通，并返回出口 IP。"""
+    data = request.get_json(silent=True) or {}
+    proxy_url = data.get('proxyUrl') or ''
+    from impl.settings import check_proxy_connection
+    result = check_proxy_connection(proxy_url)
+    if not result['ok']:
+        return jsonify({"code": 400, "msg": result['error'] or '连接失败'})
+    return jsonify({"code": 200, "msg": "连接成功", "data": {"ip": result['ip']}})
+
+
 # ========== 草稿箱 ==========
 
 # 平台 ID → (key, 名称) 映射。key 必须与 frontend config/platforms.js 一致,

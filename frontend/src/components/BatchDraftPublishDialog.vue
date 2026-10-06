@@ -98,6 +98,8 @@ const tableData = computed(() =>
 watch(
   () => props.visible,
   (vis) => {
+    // 上次确认后若没复位，loading 会把按钮禁用，再次打开就一直转圈且点不出去
+    submitting.value = false
     if (vis) {
       selectedIds.value = tableData.value
         .filter((r) => r.status === 'ok')

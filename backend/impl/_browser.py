@@ -16,6 +16,36 @@ from util._logger import get_channel_logger
 logger = get_channel_logger("browser")
 
 
+def _configured_proxy() -> str | None:
+    """系统设置里的 HTTP 代理。有值时，所有平台的浏览器都走它。"""
+    from .settings import get_proxy_url
+
+    url = get_proxy_url()
+    if not url:
+        return None
+    url = str(url).strip()
+    return url or None
+
+
+def _proxy_for_launch() -> str | None:
+    """取出代理并确认能连通。未配置则直连；连通失败则不启动浏览器。"""
+    proxy = _configured_proxy()
+    if not proxy:
+        return None
+    from .settings import check_proxy_connection
+
+    result = check_proxy_connection(proxy)
+    if not result["ok"]:
+        logger.warning("[浏览器] 代理连接失败: %s", result["error"])
+        raise RuntimeError(f"代理连接失败：{result['error']}")
+    logger.info("[浏览器] 代理可用，出口 IP %s", result["ip"])
+    return proxy
+
+
+async def _proxy_for_launch_async() -> str | None:
+    return await asyncio.to_thread(_proxy_for_launch)
+
+
 def _download_binary():
     """Download CloakBrowser stealth binary."""
     from cloakbrowser import ensure_binary
@@ -41,7 +71,7 @@ async def create_browser(
 ):
     """异步入口：创建 stealth Chromium 浏览器。
 
-    不接 proxy / extra_args —— 历史代理配置已废弃。
+    系统设置里填了 HTTP 代理时，所有平台都走该代理，启动前会先确认代理可用；留空则直连。
 
     login_mode=True 或 headless=False（有头）时，自动监听浏览器关闭
     事件：**用户手动**关浏览器会 cancel 当前 asyncio task，使 login/发布
@@ -56,11 +86,13 @@ async def create_browser(
     if headless is None:
         headless = LOGIN_HEADLESS if login_mode else LOCAL_CHROME_HEADLESS
     from cloakbrowser import launch_async
+    proxy = await _proxy_for_launch_async()
     browser = await launch_async(
         headless=headless,
         args=["--start-maximized"],
         humanize=humanize,
         human_preset=human_preset,
+        proxy=proxy,
     )
 
     if login_mode or headless is False:
@@ -181,11 +213,13 @@ async def create_persistent_context(
 ):
     """异步入口：登录扫码用持久化 context（no_viewport，跟随窗口自适应）。"""
     from cloakbrowser import launch_persistent_context_async
+    proxy = await _proxy_for_launch_async()
     return await launch_persistent_context_async(
         user_data_dir,
         headless=headless,
         no_viewport=True,
         args=["--window-size=1920,1080", "--start-maximized"],
+        proxy=proxy,
     )
 
 
@@ -194,7 +228,8 @@ async def create_persistent_context(
 def create_browser_sync(headless: bool = False):
     """同步入口：创建 stealth Chromium 浏览器。"""
     from cloakbrowser import launch
-    return launch(headless=headless)
+    proxy = _proxy_for_launch()
+    return launch(headless=headless, proxy=proxy)
 
 
 def create_context_sync(

@@ -12,7 +12,7 @@
       <div class="setting-row">
         <div class="setting-info">
           <span class="setting-label">HTTP 代理地址</span>
-          <span class="setting-desc">用于 YouTube、TikTok 等海外平台的浏览器连接，国内平台无需代理</span>
+          <span class="setting-desc">登录、校验和发布时，所有平台的浏览器都走此代理，打开前会先确认代理可用。留空则直连</span>
         </div>
         <div class="setting-control">
           <el-input
@@ -21,10 +21,12 @@
             style="width: 300px"
             clearable
           />
+          <el-button :loading="proxyTesting" @click="testProxy">测试连接</el-button>
         </div>
       </div>
+      <p v-if="proxyTest.msg" class="proxy-test-line" :class="{ ok: proxyTest.ok }">{{ proxyTest.msg }}</p>
       <div class="proxy-platforms">
-        <span class="proxy-tag" v-for="p in overseasPlatforms" :key="p.key">
+        <span class="proxy-tag" v-for="p in platformList" :key="p.key">
           <img :src="p.logo" :alt="p.name" class="proxy-tag-logo" />
           {{ p.name }}
         </span>
@@ -332,7 +334,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatDotRound, Plus, Close, Warning } from '@element-plus/icons-vue'
 import { settingsApi } from '@/api/v2'
@@ -456,6 +458,36 @@ const settings = reactive({
   feedbackEmail: '',
 })
 
+const proxyTesting = ref(false)
+const proxyTest = reactive({ ok: false, msg: '' })
+
+watch(() => settings.proxyUrl, () => {
+  proxyTest.ok = false
+  proxyTest.msg = ''
+})
+
+async function testProxy() {
+  const proxyUrl = (settings.proxyUrl || '').trim()
+  if (!proxyUrl) {
+    proxyTest.ok = false
+    proxyTest.msg = '请先填写代理地址'
+    return
+  }
+  proxyTesting.value = true
+  try {
+    const res = await settingsApi.testProxy(proxyUrl)
+    const ip = res.data?.ip || ''
+    proxyTest.ok = true
+    proxyTest.msg = ip ? `连接成功，出口 IP：${ip}` : '连接成功'
+    ElMessage.success(proxyTest.msg)
+  } catch (e) {
+    proxyTest.ok = false
+    proxyTest.msg = e.message || '连接失败'
+  } finally {
+    proxyTesting.value = false
+  }
+}
+
 const s3Testing = ref(false)
 
 async function testS3Connection() {
@@ -472,9 +504,6 @@ async function testS3Connection() {
   }
   s3Testing.value = false
 }
-
-// 海外平台列表
-const overseasPlatforms = platformList.filter(p => ['youtube', 'tiktok'].includes(p.key))
 
 // 技术栈版本
 const frontendStack = [
@@ -692,8 +721,19 @@ onMounted(() => {
       }
     }
 
+    .proxy-test-line {
+      margin: 0 0 8px 4px;
+      font-size: 13px;
+      color: $danger-color;
+
+      &.ok {
+        color: $success-color;
+      }
+    }
+
     .proxy-platforms {
       display: flex;
+      flex-wrap: wrap;
       gap: $spacing-sm;
       margin-top: $spacing-sm;
       padding-left: 4px;

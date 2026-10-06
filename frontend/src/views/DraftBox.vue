@@ -146,6 +146,7 @@
 
     <!-- Batch draft publish dialog -->
     <BatchDraftPublishDialog
+      ref="batchDialogRef"
       v-model:visible="dialogVisible"
       :drafts="dialogDrafts"
       :failures="dialogFailures"
@@ -248,6 +249,7 @@ const overflowMap = ref({})
 const selection = ref(new Set())           // 选中的草稿 id
 const selectMode = ref(false)              // 多选模式开关
 const dialogVisible = ref(false)
+const batchDialogRef = ref(null)
 const dialogDrafts = ref([])                // 给 dialog 的草稿列表
 const dialogFailures = ref([])              // 校验失败列表
 const isPublishing = ref(false)
@@ -494,6 +496,7 @@ async function onDialogConfirm(confirmedIds) {
     ElMessage.error({ message: `批量发布失败：${e?.message || e}` })
   } finally {
     isPublishing.value = false
+    batchDialogRef.value?.resetSubmitting()
   }
 }
 </script>

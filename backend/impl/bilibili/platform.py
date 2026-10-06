@@ -812,25 +812,20 @@ class BilibiliPlatform(BasePlatform):
                         await asyncio.sleep(2)
 
                 if not submitted:
-                    logger.info(
-                        "[上传视频] could not confirm submission, "
-                        "but it may have succeeded"
+                    raise RuntimeError(
+                        "未能确认投稿成功：提交按钮仍在，页面也没有离开上传页"
                     )
 
-                if submitted:
-                    # 已看到跳转/按钮消失 = 投稿受理成功，不再固定等 10s
-                    # （成功页都出来了还干等，用户体感「判定慢」），2s 稳定后截图
-                    logger.info("[上传视频] submitted, settling 2s")
-                    await asyncio.sleep(2)
-                    try:
-                        await page.screenshot(
-                            path=str(
-                                log_dir / "bilibili_after_submit.png"
-                            ),
-                            full_page=True,
-                        )
-                    except Exception:
-                        pass
+                # 已看到跳转/按钮消失 = 投稿受理成功，不再固定等 10s
+                logger.info("[上传视频] submitted, settling 2s")
+                await asyncio.sleep(2)
+                try:
+                    await page.screenshot(
+                        path=str(log_dir / "bilibili_after_submit.png"),
+                        full_page=True,
+                    )
+                except Exception:
+                    pass
 
                 upload_success = True
             finally:
@@ -851,26 +846,85 @@ class BilibiliPlatform(BasePlatform):
 
     @staticmethod
     async def _upload_video_file(page, file_path: str):
-        """Select the video file via iframe or direct file input."""
-        logger.info("[上传视频] 正在上传视频文件...")
+        """把视频送进当前投稿页的上传入口。
 
+        新版创作中心停在空白的「上传视频」按钮上，页面里可能还有别的
+        file input。直接给第一个 input 设文件时，按钮这一屏不会动，
+        后面等「上传完成」会一直空转。先点可见的「上传视频」按钮。
+        """
+        logger.info("[上传视频] 正在上传视频文件...")
+        await BilibiliPlatform._choose_via_upload_button(page, file_path)
+        if not await BilibiliPlatform._left_upload_entry(page):
+            logger.info("[上传视频] 点击按钮后仍停在上传入口，改走 file input")
+            await BilibiliPlatform._set_video_file_input(page, file_path)
+        if not await BilibiliPlatform._left_upload_entry(page):
+            raise RuntimeError(
+                "视频没有进入上传：页面仍停在「上传视频」入口，尚未开始上传"
+            )
+        logger.info("[上传视频] 已离开上传入口，等待上传完成")
+
+    @staticmethod
+    async def _choose_via_upload_button(page, file_path: str) -> None:
+        btn = None
+        candidates = page.get_by_text("上传视频", exact=True)
+        count = await candidates.count()
+        for i in range(count):
+            item = candidates.nth(i)
+            try:
+                if await item.is_visible():
+                    btn = item
+                    break
+            except Exception:
+                continue
+        if btn is None:
+            logger.info("[上传视频] 页面上没有可见的「上传视频」按钮")
+            return
+        try:
+            async with page.expect_file_chooser(timeout=8000) as fc_info:
+                await btn.click()
+            await (await fc_info.value).set_files(file_path)
+            logger.info("[上传视频] 已点击「上传视频」并选中文件")
+        except Exception as exc:
+            logger.info("[上传视频] 点击「上传视频」选文件失败: %s", exc)
+
+    @staticmethod
+    async def _set_video_file_input(page, file_path: str) -> None:
         file_input = None
         try:
             upload_frame = page.frame_locator('iframe[name="videoUpload"]')
             input_in_frame = upload_frame.locator('input[type="file"]')
-            await input_in_frame.wait_for(state="attached", timeout=5000)
+            await input_in_frame.wait_for(state="attached", timeout=3000)
             file_input = input_in_frame
+            logger.info("[上传视频] 使用 iframe 内的 file input")
         except Exception:
             logger.info("[上传视频] upload iframe not found, trying main page")
 
         if file_input is None:
             file_input = page.locator(
-                'input[type="file"][accept*="video"], input[type="file"]'
+                'input[type="file"][accept*="video"], '
+                'input[type="file"][accept*="mp4"]'
             ).first
             await file_input.wait_for(state="attached", timeout=10000)
+            logger.info("[上传视频] 使用主页面 video file input")
 
         await file_input.set_input_files(file_path)
-        logger.info("[上传视频] 视频文件已选择, 等待上传完成")
+        logger.info("[上传视频] 视频文件已写入 file input")
+
+    @staticmethod
+    async def _left_upload_entry(page) -> bool:
+        """空白入口文案消失，才算真正开始上传。"""
+        entry = page.get_by_text("点击上传或将视频拖拽到此区域")
+        for _ in range(30):
+            try:
+                still_there = (
+                    await entry.count() > 0 and await entry.first.is_visible()
+                )
+            except Exception:
+                still_there = False
+            if not still_there:
+                return True
+            await asyncio.sleep(0.5)
+        return False
 
     @staticmethod
     async def _wait_upload_complete(page):
@@ -903,6 +957,13 @@ class BilibiliPlatform(BasePlatform):
             except RuntimeError:
                 raise
             except Exception as exc:
+                msg = str(exc).lower()
+                if (
+                    "has been closed" in msg
+                    or "target closed" in msg
+                    or "execution context was destroyed" in msg
+                ):
+                    raise RuntimeError("浏览器/页面已关闭，上传中止") from exc
                 if i % 60 == 0 and i > 0:
                     logger.info("[上传视频] 上传状态检查: %s", exc)
             await asyncio.sleep(0.5)
