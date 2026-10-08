@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 双击启动时，失败会直接关掉终端。非 0 退出先停住，让人看完原因。
+hold_window_on_error() {
+    local code=$?
+    if [[ "$code" -ne 0 && -t 1 ]]; then
+        echo ""
+        echo "启动未完成（退出码 ${code}）。按回车关闭窗口..."
+        read -r _ || true
+    fi
+}
+trap hold_window_on_error EXIT
+
 # ============================================================
 # 一键启动脚本 — Linux + macOS
 # ============================================================
@@ -77,7 +88,7 @@ if [[ ! -d "$BACKEND_DIR" ]]; then
     git init
     git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
     if ! git fetch origin "$MAIN_BRANCH"; then
-        print_fail "无法连接 GitHub，请检查网络连接"
+        echo -e "${CROSS} 无法连接 GitHub，请检查网络连接"
         echo "  如果无法访问 GitHub，请手动下载项目代码到当前目录"
         echo "  仓库地址: $REPO_URL"
         exit 1
