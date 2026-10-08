@@ -447,6 +447,15 @@ if [[ -f "$VENV_PYTHON" ]]; then
         NEED_RECREATE_VENV=1
     fi
 fi
+# 目录改名后，pip 等脚本的 shebang 仍指向旧路径，直接执行会退出 126。
+if [[ -f "$VENV_PIP" && "$NEED_RECREATE_VENV" -eq 0 ]]; then
+    pip_python=$(head -n 1 "$VENV_PIP" 2>/dev/null || true)
+    pip_python=${pip_python#\#!}
+    if [[ -n "$pip_python" && ! -x "$pip_python" ]]; then
+        print_warn "虚拟环境指向已不存在的目录，准备重建 venv"
+        NEED_RECREATE_VENV=1
+    fi
+fi
 
 if [[ ! -d "$VENV_DIR" ]] || [[ ! -f "$VENV_PIP" ]] || [[ "$NEED_RECREATE_VENV" -eq 1 ]]; then
     if [[ "$NEED_RECREATE_VENV" -eq 1 ]]; then
@@ -472,15 +481,15 @@ if [[ ! -d "$VENV_DIR" ]] || [[ ! -f "$VENV_PIP" ]] || [[ "$NEED_RECREATE_VENV" 
         python3 -m venv "$VENV_DIR"
     fi
     printf "\r  ${CHECK} 虚拟环境创建完成\n"
-    "$VENV_PIP" cache purge >/dev/null 2>&1 || true
+    "$VENV_PYTHON" -m pip cache purge >/dev/null 2>&1 || true
     echo -e "  ${CYAN}安装 Python 依赖（首次安装，请稍候）...${NC}"
-    "$VENV_PIP" install -r "$BACKEND_DIR/requirements.txt" --no-cache-dir -i "$PIP_MIRROR"
+    "$VENV_PYTHON" -m pip install -r "$BACKEND_DIR/requirements.txt" --no-cache-dir -i "$PIP_MIRROR"
     echo "$CURRENT_HASH" > "$HASH_FILE"
     print_ok "后端环境就绪"
 elif check_hash_changed "$HASH_FILE" "$CURRENT_HASH"; then
-    "$VENV_PIP" cache purge >/dev/null 2>&1 || true
+    "$VENV_PYTHON" -m pip cache purge >/dev/null 2>&1 || true
     echo -e "  ${CYAN}检测到变更，更新 Python 依赖...${NC}"
-    "$VENV_PIP" install -r "$BACKEND_DIR/requirements.txt" --no-cache-dir -i "$PIP_MIRROR"
+    "$VENV_PYTHON" -m pip install -r "$BACKEND_DIR/requirements.txt" --no-cache-dir -i "$PIP_MIRROR"
     echo "$CURRENT_HASH" > "$HASH_FILE"
     print_ok "依赖更新完成"
 else
