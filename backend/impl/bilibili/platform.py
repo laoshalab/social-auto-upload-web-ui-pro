@@ -848,14 +848,20 @@ class BilibiliPlatform(BasePlatform):
     async def _upload_video_file(page, file_path: str):
         """把视频送进当前投稿页的上传入口。
 
-        新版创作中心停在空白的「上传视频」按钮上，页面里可能还有别的
-        file input。直接给第一个 input 设文件时，按钮这一屏不会动，
-        后面等「上传完成」会一直空转。先点可见的「上传视频」按钮。
+        新版投稿页的 file input 不在「上传视频」按钮里，而在外层 bcc-upload-wrapper。
+        直接写入这个 input 才会开始上传。按钮带 no-events，点击会被挡住。
+        选中文件后按钮会收起，拖拽文案可能还留在页面上。
         """
         logger.info("[上传视频] 正在上传视频文件...")
-        await BilibiliPlatform._choose_via_upload_button(page, file_path)
+        wrote_wrapper = await BilibiliPlatform._set_wrapper_file_input(page, file_path)
+        if wrote_wrapper and await BilibiliPlatform._left_upload_entry(page):
+            logger.info("[上传视频] 已离开上传入口，等待上传完成")
+            return
+        if not wrote_wrapper or await BilibiliPlatform._upload_entry_still_open(page):
+            logger.info("[上传视频] 改为点击上传区域")
+            await BilibiliPlatform._choose_via_upload_button(page, file_path)
         if not await BilibiliPlatform._left_upload_entry(page):
-            logger.info("[上传视频] 点击按钮后仍停在上传入口，改走 file input")
+            logger.info("[上传视频] 点击后仍停在上传入口，改走其他 file input")
             await BilibiliPlatform._set_video_file_input(page, file_path)
         if not await BilibiliPlatform._left_upload_entry(page):
             raise RuntimeError(
@@ -864,31 +870,72 @@ class BilibiliPlatform(BasePlatform):
         logger.info("[上传视频] 已离开上传入口，等待上传完成")
 
     @staticmethod
-    async def _choose_via_upload_button(page, file_path: str) -> None:
-        btn = None
+    async def _visible_upload_area(page):
+        """返回实际接收点击的上传区域。按钮本身带 no-events，不能点文字。"""
+        areas = page.locator("div.upload-area")
+        count = await areas.count()
+        for i in range(count):
+            area = areas.nth(i)
+            btn = area.locator("div.upload-btn").filter(has_text="上传视频")
+            try:
+                if await btn.count() > 0 and await btn.first.is_visible():
+                    return area
+            except Exception:
+                continue
         candidates = page.get_by_text("上传视频", exact=True)
         count = await candidates.count()
         for i in range(count):
             item = candidates.nth(i)
             try:
                 if await item.is_visible():
-                    btn = item
-                    break
+                    area = item.locator("xpath=ancestor::div[contains(@class,'upload-area')]")
+                    if await area.count() > 0:
+                        return area.first
+                    return item
             except Exception:
                 continue
-        if btn is None:
+        return None
+
+    @staticmethod
+    async def _choose_via_upload_button(page, file_path: str) -> None:
+        target = await BilibiliPlatform._visible_upload_area(page)
+        if target is None:
             logger.info("[上传视频] 页面上没有可见的「上传视频」按钮")
             return
         try:
             async with page.expect_file_chooser(timeout=8000) as fc_info:
-                await btn.click()
+                await target.click(timeout=5000)
             await (await fc_info.value).set_files(file_path)
-            logger.info("[上传视频] 已点击「上传视频」并选中文件")
+            logger.info("[上传视频] 已点击上传区域并选中文件")
         except Exception as exc:
-            logger.info("[上传视频] 点击「上传视频」选文件失败: %s", exc)
+            logger.info("[上传视频] 点击上传区域选文件失败: %s", exc)
+
+    @staticmethod
+    async def _set_wrapper_file_input(page, file_path: str) -> bool:
+        """新版投稿页的 file input 在 upload-area 外面，挂在 bcc-upload-wrapper 上。"""
+        target = page.locator("div.bcc-upload-wrapper input[type='file']").first
+        try:
+            await target.wait_for(state="attached", timeout=15000)
+            await target.set_input_files(file_path)
+            logger.info("[上传视频] 已写入 bcc-upload-wrapper 的 file input")
+            return True
+        except Exception as exc:
+            logger.info("[上传视频] 写入 bcc-upload-wrapper 失败: %s", exc)
+            return False
 
     @staticmethod
     async def _set_video_file_input(page, file_path: str) -> None:
+        area = await BilibiliPlatform._visible_upload_area(page)
+        if area is not None:
+            area_input = area.locator('input[type="file"]')
+            try:
+                if await area_input.count() > 0:
+                    await area_input.first.set_input_files(file_path)
+                    logger.info("[上传视频] 使用上传区域内的 file input")
+                    return
+            except Exception as exc:
+                logger.info("[上传视频] 上传区域内的 file input 写入失败: %s", exc)
+
         file_input = None
         try:
             upload_frame = page.frame_locator('iframe[name="videoUpload"]')
@@ -911,17 +958,32 @@ class BilibiliPlatform(BasePlatform):
         logger.info("[上传视频] 视频文件已写入 file input")
 
     @staticmethod
-    async def _left_upload_entry(page) -> bool:
-        """空白入口文案消失，才算真正开始上传。"""
+    async def _upload_entry_still_open(page) -> bool:
+        """「上传视频」按钮还看得见，就还停在空白入口。
+
+        选中文件后按钮会收起，拖拽文案可能还留在 DOM 里，不能单看这句文案。
+        """
+        try:
+            buttons = page.locator("div.upload-btn").filter(has_text="上传视频")
+            count = await buttons.count()
+            if count > 0:
+                for i in range(count):
+                    if await buttons.nth(i).is_visible():
+                        return True
+                return False
+        except Exception:
+            pass
         entry = page.get_by_text("点击上传或将视频拖拽到此区域")
+        try:
+            return await entry.count() > 0 and await entry.first.is_visible()
+        except Exception:
+            return False
+
+    @staticmethod
+    async def _left_upload_entry(page) -> bool:
+        """空白入口消失，才算真正开始上传。"""
         for _ in range(30):
-            try:
-                still_there = (
-                    await entry.count() > 0 and await entry.first.is_visible()
-                )
-            except Exception:
-                still_there = False
-            if not still_there:
+            if not await BilibiliPlatform._upload_entry_still_open(page):
                 return True
             await asyncio.sleep(0.5)
         return False

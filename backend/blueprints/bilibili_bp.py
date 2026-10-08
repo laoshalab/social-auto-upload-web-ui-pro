@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from conf import BASE_DIR
 from util._logger import get_channel_logger
 from impl._browser import create_browser, create_context
+from impl.bilibili.platform import BilibiliPlatform
 from services.test_video import get_test_video
 
 logger = get_channel_logger("bilibili")
@@ -129,7 +130,7 @@ async def _fetch_collections_via_browser(cookie_file: str) -> dict:
 
     流程:
       1. 用账号 cookie 打开 B 站视频上传页
-      2. 上传测试视频(通过 iframe 或主页面的 input)
+      2. 上传测试视频(与发布同一套入口，点 upload-area)
       3. 等标题输入框出现(= 页面跳转到发布表单,不需要等上传完成)
       4. 点击「请选择合集」入口,展开合集选择浮层
       5. 直接解析浮层 DOM 的 season-item-title 文本(合集名)
@@ -160,27 +161,15 @@ async def _fetch_collections_via_browser(cookie_file: str) -> dict:
                 logger.info(f"[合集列表] 页面加载(非致命): {e}")
 
             # 2. 上传测试视频触发页面跳转到发布表单(不等上传完成)
-            # 完全复用 platform.py 的 _upload_video_file 同款逻辑
             test_video = get_test_video()
             if not test_video:
                 return {"success": False, "error": "未找到测试视频文件"}
             logger.info(f"[合集列表] 上传测试视频触发页面跳转: {test_video}")
-
-            file_input = None
             try:
-                upload_frame = page.frame_locator('iframe[name="videoUpload"]')
-                input_in_frame = upload_frame.locator('input[type="file"]')
-                await input_in_frame.wait_for(state="attached", timeout=5000)
-                file_input = input_in_frame
-            except Exception:
-                pass
-            if file_input is None:
-                file_input = page.locator(
-                    'input[type="file"][accept*="video"], input[type="file"]'
-                ).first
-                await file_input.wait_for(state="attached", timeout=10000)
-            await file_input.set_input_files(test_video)
-            logger.info("[合集列表] 视频已选择,等待页面跳转到发布表单...")
+                await BilibiliPlatform._upload_video_file(page, test_video)
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+            logger.info("[合集列表] 视频已进入上传,等待页面跳转到发布表单...")
 
             # 3. 等标题输入框出现(= 发布表单就绪,不需要等上传完成)
             title_input = page.locator('input[placeholder*="标题"]').first
